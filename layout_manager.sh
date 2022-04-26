@@ -14,37 +14,17 @@
 
 # #{ CHECK DEPENDENCIES
 
-VIM_BIN="$(whereis -b vim | awk '{print $2}')"
-NVIM_BIN="$(whereis -b nvim | awk '{print $2}')"
-JQ_BIN="$(whereis -b jq | awk '{print $2}')"
-XDOTOOL_BIN="$(whereis -b xdotool | awk '{print $2}')"
-XRANDR_BIN="$(whereis -b xrandr | awk '{print $2}')"
-ROFI_BIN="$(whereis -b rofi | awk '{print $2}')"
+VIM_BIN="$(type -P vim)"
+NVIM_BIN="$(type -P nvim)"
 
 if [ -z "$NVIM_BIN" ] && [ -z "$VIM_BIN" ]; then
   echo missing vim or neovim, please install dependencies
   exit 1
 fi
 
-if [ -z "$JQ_BIN" ]; then
-  echo missing jq, please install dependencies
-  exit 1
-fi
-
-if [ -z "$XDOTOOL_BIN" ]; then
-  echo missing xdotool, please install dependencies
-  exit 1
-fi
-
-if [ -z "$XRANDR_BIN" ]; then
-  echo missing xrandr, please install dependencies
-  exit 1
-fi
-
-if [ -z "$ROFI_BIN" ]; then
-  echo missing rofi, please install dependencies
-  exit 1
-fi
+for i in xdotool xrandr rofi jq; do
+    command -v "$i" $>/dev/null || echo "Missing $i, please install dependencies"
+done
 
 # #}
 
@@ -59,7 +39,7 @@ else
 fi
 
 # make directory for storing layouts
-mkdir -p $LAYOUT_PATH > /dev/null 2>&1
+[ ! -d "$LAYOUT_PATH" ] && mkdir -p "$LAYOUT_PATH"
 
 # logs
 LOG_FILE=/tmp/i3_layout_manager.txt
@@ -68,9 +48,9 @@ echo "" > "$LOG_FILE"
 # #{ ASK FOR THE ACTION
 
 # if operating using dmenu
-if [ -z $1 ]; then
+if [ -z "$1" ]; then
 
-  ACTION=$(echo "LOAD LAYOUT
+ACTION=$(echo "LOAD LAYOUT
 SAVE LAYOUT
 DELETE LAYOUT" | rofi -i -dmenu -no-custom -p "Select action")
 
@@ -79,7 +59,7 @@ DELETE LAYOUT" | rofi -i -dmenu -no-custom -p "Select action")
   fi
 
   # get me layout names based on existing file names in the LAYOUT_PATH
-  LAYOUT_NAMES=$(ls -Rt $LAYOUT_PATH | grep "layout.*json" | sed -nr 's/layout-(.*)\.json/\1/p' | sed 's/\s/\n/g' | sed 's/_/ /g') # layout names
+  LAYOUT_NAMES=$(\ls -Rt $LAYOUT_PATH | grep "layout.*json" | sed -nr 's/layout-(.*)\.json/\1/p; s/\s/\n/g; s/_/ /g') # layout names
   LAYOUT_NAME=$(echo "$LAYOUT_NAMES" | rofi -i -dmenu -p "Select layout (you may type new name when creating)" | sed 's/\s/_/g') # ask for selection
   LAYOUT_NAME=${LAYOUT_NAME^^} # upper case
 
@@ -110,7 +90,7 @@ else
   LAYOUT_FILE=$LAYOUT_PATH/layout-"$LAYOUT_NAME".json
 fi
 
-echo $LAYOUT_FILE
+echo "$LAYOUT_FILE"
 
 if [ "$ACTION" == "LOAD LAYOUT" ] && [ ! -f "$LAYOUT_FILE" ]; then
   exit
@@ -140,7 +120,7 @@ if [[ "$ACTION" = "LOAD LAYOUT" ]]; then
 
     # the grep filters out a line which reports on the command that was just being called
     # however, the line is not there when calling with rofi from i3
-    HAS_PID=$(xdotool getwindowpid $window 2>&1 | grep -v command | wc -l)
+    HAS_PID=$(xdotool getwindowpid $window 2>&1 | grep -cv command)
 
     echo "Unloading window '$window'" >> "$LOG_FILE"
 
@@ -158,10 +138,10 @@ if [[ "$ACTION" = "LOAD LAYOUT" ]]; then
 
   # delete all empty layout windows from the workspace
   # we just try to focus any window on the workspace (there should not be any, we unloaded them)
-  for (( i=0 ; $a-100 ; a=$a+1 )); do
+  for (( i=0 ; a-100 ; ++a )); do
 
     # check window for STICKY before killing - if sticky do not kill
-    xprop -id $(xdotool getwindowfocus) | grep -q '_NET_WM_STATE_STICK'
+    xprop -id $(xdotool getwindowfocus) | grep -Fq '_NET_WM_STATE_STICK'
 
     if [ $? -eq 1 ]; then
 
@@ -193,7 +173,7 @@ if [[ "$ACTION" = "LOAD LAYOUT" ]]; then
 
     # the grep filters out a line which reports on the command that was just being called
     # however, the line is not there when calling with rofi from i3
-    HAS_PID=$(xdotool getwindowpid $window 2>&1 | grep -v command | wc -l)
+    HAS_PID=$(xdotool getwindowpid $window 2>&1 | grep -cv command)
 
     echo "Loading back window '$window'" >> "$LOG_FILE"
 
@@ -241,16 +221,16 @@ MATCH ANY" | rofi -i -dmenu -p "How to identify windows? (xprop style)")
   # cp $ALL_WS_FILE $LAYOUT_PATH/all_temp.txt
 
   # back the output file.. we are gonna modify it and alter we will need it back
-  BACKUP_FILE=$LAYOUT_PATH/.layout_backup.txt
-  cp $LAYOUT_FILE $BACKUP_FILE
+  BACKUP_FILE="$LAYOUT_PATH/.layout_backup.txt"
+  cp "$LAYOUT_FILE" "$BACKUP_FILE"
 
   # get me vim, we will be using it alot to postprocess the generated json files
-  if [ -x "$(whereis nvim | awk '{print $2}')" ]; then
-    VIM_BIN="$(whereis nvim | awk '{print $2}')"
+  if [ -x "$(type -P nvim)" ]; then
+    VIM_BIN="$(type -P nvim)"
     HEADLESS="--headless"
     GOT_NVIM=true
-  elif [ -x "$(whereis vim | awk '{print $2}')" ]; then
-    VIM_BIN="$(whereis vim | awk '{print $2}')"
+  elif [ -x "$(type -P vim)" ]; then
+    VIM_BIN="$(type -P vim)"
     HEADLESS=""
     GOT_VIM=true
   fi
@@ -279,33 +259,31 @@ MATCH ANY" | rofi -i -dmenu -p "How to identify windows? (xprop style)")
   fi
 
   # remove comments
-  $VIM_BIN $HEADLESS -nEs -u NONE -c '%g/\/\//norm dd' -c "wqa" -- "$LAYOUT_FILE"
-  $VIM_BIN $HEADLESS -nEs -u NONE -c '%g/\/\//norm dd' -c "wqa" -- "$ALL_WS_FILE"
+  sed -i '/\/\//d' "$LAYOUT_FILE" "$ALL_WS_FILE"
 
   # remove indents
   $VIM_BIN $HEADLESS -nEs -u NONE -c '%g/^/norm 0d^' -c "wqa" -- "$LAYOUT_FILE"
   $VIM_BIN $HEADLESS -nEs -u NONE -c '%g/^/norm 0d^' -c "wqa" -- "$ALL_WS_FILE"
 
   # remove commas
-  $VIM_BIN $HEADLESS -nEs -u NONE -c '%s/^},$/}/g' -c "wqa" -- "$LAYOUT_FILE"
-  $VIM_BIN $HEADLESS -nEs -u NONE -c '%s/^},$/}/g' -c "wqa" -- "$ALL_WS_FILE"
+  sed -i 's/^},$/}/g' "$LAYOUT_FILE" "$ALL_WS_FILE"
 
   # remove empty lines in the the workspace file
-  $VIM_BIN $HEADLESS -nEs -u NONE -c '%g/^$/norm dd' -c "wqa" -- "$LAYOUT_FILE"
+  sed -i '/^$/d' "$LAYOUT_FILE"
 
   # now I will try to find the part in the big file which containts the
   # small file. I have not found a suitable solution using off-the-shelf
   # tools, so custom bash it is...
 
   MATCH=0
-  PATTERN_LINES=`cat $LAYOUT_FILE | wc -l` # get me the number of lines in the small file
-  SOURCE_LINES=`cat $ALL_WS_FILE | wc -l` # get me the number of lines in the big file
+  PATTERN_LINES=`wc -l "$LAYOUT_FILE"|awk '{print $1}'` # get me the number of lines in the small file
+  SOURCE_LINES=`wc -l "$ALL_WS_FILE"|awk '{print $1}'` # get me the number of lines in the big file
 
-  N_ITER=$(expr $SOURCE_LINES - $PATTERN_LINES)
-  readarray pattern < $LAYOUT_FILE
+  N_ITER=$((SOURCE_LINES - PATTERN_LINES))
+  readarray pattern < "$LAYOUT_FILE"
 
   MATCH_LINE=0
-  for (( a=1 ; $a-$N_ITER ; a=$a+1 )); do
+  for (( a=1 ; a-N_ITER ; ++a )); do
 
     CURR_LINE=0
     MATCHED_LINES=0
@@ -314,13 +292,13 @@ MATCH ANY" | rofi -i -dmenu -p "How to identify windows? (xprop style)")
       PATTERN_LINE=$(echo ${pattern[$CURR_LINE]} | tr -d '\n')
 
       if [[ "$line1" == "$PATTERN_LINE" ]]; then
-        MATCHED_LINES=$(expr $MATCHED_LINES + 1)
+          MATCHED_LINES=$(( MATCHED_LINES + 1 ))
       else
         break
       fi
 
-      CURR_LINE=$(expr $CURR_LINE + 1)
-    done <<< $(cat "$ALL_WS_FILE" | tail -n +"$a")
+      CURR_LINE=$(( CURR_LINE + 1 ))
+    done <<< $(tail -n +"$a" "$ALL_WS_FILE")
 
     if [[ "$MATCHED_LINES" == "$PATTERN_LINES" ]];
     then
@@ -332,14 +310,14 @@ MATCH ANY" | rofi -i -dmenu -p "How to identify windows? (xprop style)")
   # lets extract the key part, containing the block with the root split
 
   # load old workspace file (we destroyed the old one, remember?)
-  mv $BACKUP_FILE $LAYOUT_FILE
+  mv "$BACKUP_FILE" "$LAYOUT_FILE"
 
-  $VIM_BIN $HEADLESS -nEs -u NONE -c '%s/\\\\//g' -c "wqa" -- "$LAYOUT_FILE"
+  sed -i 's/\\\\//g' "$LAYOUT_FILE"
 
   # delete the part below and above the block
   $VIM_BIN $HEADLESS -nEs -u NONE -c "normal ${MATCH_LINE}ggdGG{kdgg" -c "wqa" -- "$ALL_WS_FILE"
   # rename the "workspace to "con" (container)
-  $VIM_BIN $HEADLESS -nEs -u NONE -c '%g/type/norm ^Wlciwcon' -c "wqa" -- "$ALL_WS_FILE"
+  sed -i '/type/ s/lci/con/' "$ALL_WS_FILE"
   # change the fullscrean to 0
   $VIM_BIN $HEADLESS -nEs -u NONE -c '%g/fullscreen/norm ^Wr0' -c "wqa" -- "$ALL_WS_FILE"
 
@@ -348,7 +326,7 @@ MATCH ANY" | rofi -i -dmenu -p "How to identify windows? (xprop style)")
   # the information about the split type
   cat $ALL_WS_FILE | cat - $LAYOUT_FILE > /tmp/tmp.txt && mv /tmp/tmp.txt $LAYOUT_FILE
   # add closing bracked at the end
-  $VIM_BIN $HEADLESS -nEs -u NONE -c 'normal Go]}' -c "wqa" -- "$LAYOUT_FILE"
+  echo ']}' >> "$LAYOUT_FILE"
 
   # now we have to do some postprocessing on it, all is even advices on the official website
   # https://i3wm.org/docs/layout-saving.html
@@ -364,28 +342,28 @@ MATCH ANY" | rofi -i -dmenu -p "How to identify windows? (xprop style)")
 
     while true; do
 
-      LINE_NUM=$(cat $LAYOUT_FILE | tail -n +$LAST_LINE | grep '// "class' -n | awk '{print $1}')
+      LINE_NUM=$(tail -n +$LAST_LINE "$LAYOUT_FILE" | grep '// "class' -n | awk '{print $1}')
       HAS_INSTANCE=$(echo $LINE_NUM | wc -l)
 
       if [ ! -z "$LINE_NUM" ]; then
 
         LINE_NUM=$(echo $LINE_NUM | awk '{print $1}')
         LINE_NUM=${LINE_NUM%:}
-        LINE_NUM=$(expr $LINE_NUM - 1)
-        LINE_NUM=$(expr $LINE_NUM + $LAST_LINE )
+        LINE_NUM=$(( LINE_NUM - 1 ))
+        LINE_NUM=$(( LINE_NUM + LAST_LINE ))
 
-        NAME=$(cat $LAYOUT_FILE | sed -n "$(expr ${LINE_NUM} - 4)p" | awk '{$1="";print $0}')
+        NAME=$(sed -n "$((LINE_NUM - 4))p" "$LAYOUT_FILE" | awk '{$1="";print $0}')
 
-        SELECTED_OPTION=$(cat -n $LAYOUT_FILE | sed -n "${LINE_NUM},$(expr $LINE_NUM + 2)p" | awk '{$2="";print $0}' | rofi -i -dmenu -no-custom -p "Choose the matching method for${NAME%,}" | awk '{print $1}')
+        SELECTED_OPTION=$(cat -n $LAYOUT_FILE | sed -n "${LINE_NUM},$((LINE_NUM + 2))p" | awk '{$2="";print $0}' | rofi -i -dmenu -no-custom -p "Choose the matching method for${NAME%,}" | awk '{print $1}')
 
         # when user does not select, choose "instance" (class+1)
         if [ -z "$SELECTED_OPTION" ]; then
-          SELECTED_OPTION=$(expr ${LINE_NUM} + 1)
+            SELECTED_OPTION=$(( LINE_NUM + 1 ))
         fi
 
         $VIM_BIN $HEADLESS -nEs -u NONE -c "norm ${SELECTED_OPTION}gg^dW" -c "wqa" -- "$LAYOUT_FILE"
 
-        LAST_LINE=$( expr $SELECTED_OPTION)
+        LAST_LINE="$SELECTED_OPTION"
 
       else
         break
@@ -398,13 +376,13 @@ MATCH ANY" | rofi -i -dmenu -p "How to identify windows? (xprop style)")
   $VIM_BIN $HEADLESS -nEs -u NONE -c '%g/transient_for/norm ^dW' -c "wqa" -- "$LAYOUT_FILE"
 
   # delete all comments
-  $VIM_BIN $HEADLESS -nEs -u NONE -c '%g/\/\//norm dd' -c "wqa" -- "$LAYOUT_FILE"
+  sed -i '/\/\//d' "$LAYOUT_FILE"
 
   # add a missing comma to the last element of array we just deleted
   $VIM_BIN $HEADLESS -nEs -u NONE -c '%g/swallows/norm j^%k:s/,$//g' -c "wqa" -- "$LAYOUT_FILE"
 
   # delete all empty lines
-  $VIM_BIN $HEADLESS -nEs -u NONE -c '%g/^$/norm dd' -c "wqa" -- "$LAYOUT_FILE"
+  sed -i '/^$/d' "$LAYOUT_FILE"
 
   # pick up floating containers and move them out of the root container
   if [ -n "$GOT_VIM" ]; then
@@ -416,13 +394,13 @@ MATCH ANY" | rofi -i -dmenu -p "How to identify windows? (xprop style)")
   fi
 
   # delete all empty lines
-  $VIM_BIN $HEADLESS -nEs -u NONE -c '%g/^$/norm dd' -c "wqa" -- "$LAYOUT_FILE"
+  sed -i '/^$/d' "$LAYOUT_FILE"
 
   # add missing commas between the newly created inner parts of the root element
-  $VIM_BIN $HEADLESS -nEs -u NONE -c '%s/}\n{/},{/g' -c "wqa" -- "$LAYOUT_FILE"
+  sed -i 's/}\n{/},{/g' "$LAYOUT_FILE"
 
   # surroun everythin in []
-  $VIM_BIN $HEADLESS -nEs -u NONE -c 'normal ggO[Go]' -c "wqa" -- "$LAYOUT_FILE"
+  sed -i '1s/^/[\n/; $ a ]' "$LAYOUT_FILE"
 
   # autoformat the file
   $VIM_BIN $HEADLESS -nEs -u NONE -c 'normal gg=G' -c "wqa" -- "$LAYOUT_FILE"
